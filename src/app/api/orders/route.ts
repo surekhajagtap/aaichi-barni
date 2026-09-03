@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { createOrder } from "@/lib/db";
+import { createOrder, type Order, type OrderItem } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 const REQUIRED = ["name", "email", "phone", "address", "city", "state", "pincode"] as const;
 
 export async function POST(request: Request) {
-  let body: any;
+  let body: { items?: unknown; customer?: Record<string, string> };
   try {
     body = await request.json();
   } catch {
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Your cart is empty." }, { status: 400 });
   }
 
-  const customer = body?.customer ?? {};
+  const customer = body?.customer ?? ({} as Record<string, string>);
   const missing = REQUIRED.filter((field) => !String(customer[field] ?? "").trim());
   if (missing.length > 0) {
     return NextResponse.json(
@@ -41,7 +41,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const order = await createOrder({ items: body.items, customer });
+    // Every required field was checked above, so the shape is known good here.
+    // createOrder re-reads name and price from the database regardless.
+    const order = await createOrder({
+      items: body.items as OrderItem[],
+      customer: customer as unknown as Order["customer"],
+    });
     return NextResponse.json({ order }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Something went wrong.";

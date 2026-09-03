@@ -34,3 +34,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# The live database. Contains real customer orders — names, phone numbers and
+# delivery addresses — so it must never be committed. It is created from
+# data/db.seed.json on first run. Edit the seed to change products.
+/data/db.json
+/data/db.json.tmp

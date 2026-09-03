@@ -21,15 +21,18 @@ const config: Config = {
         // Ink
         ink: {
           DEFAULT: "#2E1C12", // body + headings (15.2:1 on ivory-50)
-          soft: "#6A5142", // secondary text (5.9:1 on ivory-50)
-          faint: "#8A7566", // captions only, >= 16px
+          soft: "#6A5142", // secondary text (7.0:1 on ivory-50)
+          faint: "#786454", // captions and labels (>= 4.99:1 on every surface)
         },
-        // Brand
+        // Brand.
+        // The bright mango/saffron hues live in the illustrations as fills.
+        // Anything that carries text is darkened until it clears 4.5:1 on
+        // ivory-50, ivory-100 and card alike.
         mango: {
-          DEFAULT: "#E8A317", // decorative / highlights, never text-on-white
-          deep: "#B87A08", // mango used as text (4.6:1 on ivory-50)
+          DEFAULT: "#E8A317", // decorative fills only, never text
+          deep: "#946005", // mango used as text (4.75:1 worst case)
         },
-        saffron: "#C97A16",
+        saffron: "#9C570C", // eyebrows and small accent text (4.94:1 worst case)
         terracotta: {
           DEFAULT: "#A8401C", // primary action (6.4:1 with white text)
           dark: "#8A3315", // hover / pressed
@@ -59,6 +62,7 @@ const config: Config = {
       },
       spacing: {
         // 4/8pt rhythm extensions for section spacing
+        13: "3.25rem", // large CTA height
         18: "4.5rem",
         22: "5.5rem",
         30: "7.5rem",

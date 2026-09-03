@@ -64,10 +64,22 @@ type Database = {
 };
 
 const DB_PATH = path.join(process.cwd(), "data", "db.json");
+const SEED_PATH = path.join(process.cwd(), "data", "db.seed.json");
 
+/**
+ * db.json holds real customer orders, so it is gitignored and does not exist on
+ * a fresh clone or a clean CI checkout. The seed — products only, no orders — is
+ * what lives in version control, and the live file is created from it on first read.
+ */
 async function read(): Promise<Database> {
-  const raw = await fs.readFile(DB_PATH, "utf8");
-  return JSON.parse(raw) as Database;
+  try {
+    return JSON.parse(await fs.readFile(DB_PATH, "utf8")) as Database;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const seed = await fs.readFile(SEED_PATH, "utf8");
+    await fs.writeFile(DB_PATH, seed, "utf8");
+    return JSON.parse(seed) as Database;
+  }
 }
 
 async function write(db: Database): Promise<void> {
