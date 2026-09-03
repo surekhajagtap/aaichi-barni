@@ -13,6 +13,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Lint, typecheck and build
@@ -38,9 +41,6 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # data/db.json is gitignored, so it is absent on a clean checkout.
-      # src/lib/db.ts creates it from data/db.seed.json on first read, which is
-      # exactly what the static product pages do during the build below.
       - name: Build
         run: npm run build
 
@@ -56,20 +56,12 @@ jobs:
           fi
           echo "No customer data in version control."
 
-  deploy:
-    name: Deploy to Vercel
+  build-pages:
+    name: Build the static site
     needs: verify
-    # Only real pushes to master deploy. Pull requests run the checks above and stop there.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: production
-      url: ${{ steps.deploy.outputs.url }}
-
-    env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
       - name: Check out the repository
@@ -81,44 +73,68 @@ jobs:
           node-version: 20
           cache: npm
 
-      # Without this the Vercel CLI fails with an opaque auth error.
-      - name: Confirm deploy secrets are present
-        run: |
-          missing=""
-          [ -z "${{ secrets.VERCEL_TOKEN }}" ] && missing="$missing VERCEL_TOKEN"
-          [ -z "${{ secrets.VERCEL_ORG_ID }}" ] && missing="$missing VERCEL_ORG_ID"
-          [ -z "${{ secrets.VERCEL_PROJECT_ID }}" ] && missing="$missing VERCEL_PROJECT_ID"
-          if [ -n "$missing" ]; then
-            echo "::error::Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions."
-            exit 1
-          fi
-          echo "Deploy secrets present."
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
 
-      - name: Install the Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Pull the production environment
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          # Pages serves the site from /<repo>/, so links and assets need the prefix.
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          # Where checkout posts orders. These are baked into the browser bundle
+          # and are meant to be public, which is why they are vars, not secrets.
+          # Leave them unset and checkout says ordering is not open yet.
+          NEXT_PUBLIC_ORDER_FORM_ENDPOINT: ${{ vars.ORDER_FORM_ENDPOINT }}
+          NEXT_PUBLIC_ORDER_FORM_KEY: ${{ vars.ORDER_FORM_KEY }}
+        run: npm run build
 
+      - name: Report whether ordering is switched on
+        run: |
+          if [ -z "${{ vars.ORDER_FORM_ENDPOINT }}" ]; then
+            echo "::warning::ORDER_FORM_ENDPOINT is not set, so checkout will show 'ordering opens soon'. Add it under Settings → Secrets and variables → Actions → Variables."
+          else
+            echo "Ordering is enabled."
+          fi
+
+      - name: Upload the built site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./out
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: build-pages
+    # Only real pushes to master publish. The environment below holds each run
+    # until a reviewer approves it, so nothing reaches the live site unseen.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy
-        id: deploy
-        run: |
-          url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "Deployed to $url"
-          echo "### Deployed :rocket:" >> "$GITHUB_STEP_SUMMARY"
-          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+        id: deployment
+        uses: actions/deploy-pages@v4
 
-      - name: Check the deployed site responds
+      - name: Check the published site responds
         run: |
-          url="${{ steps.deploy.outputs.url }}"
+          url="${{ steps.deployment.outputs.page_url }}"
           for attempt in 1 2 3 4 5; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L "$url" || true)
             if [ "$code" = "200" ]; then
               echo "$url returned 200."
+              echo "### Published :rocket:" >> "$GITHUB_STEP_SUMMARY"
+              echo "$url" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             echo "Attempt $attempt: got '$code', retrying in 10s."

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useCart } from "@/components/CartProvider";
 import { AlertIcon, CheckIcon } from "@/components/icons";
 import { rupees, shippingFor } from "@/lib/format";
+import { isOrderingEnabled, submitOrder } from "@/lib/order";
 
 type Fields =
   | "name"
@@ -84,30 +85,26 @@ export default function CheckoutPage() {
 
     setSubmitting(true);
     try {
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: lines.map((l) => ({
-            slug: l.slug,
-            name: l.name,
-            price: l.price,
-            quantity: l.quantity,
-          })),
-          customer: values,
-        }),
+      const result = await submitOrder({
+        lines: lines.map((l) => ({
+          slug: l.slug,
+          name: l.name,
+          price: l.price,
+          weight: l.weight,
+          quantity: l.quantity,
+        })),
+        subtotal,
+        shipping,
+        customer: values,
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        setServerError(data.error ?? "We could not place that order. Please try again.");
+      if (!result.ok) {
+        setServerError(result.error);
         return;
       }
 
-      setOrderId(data.order.id);
+      setOrderId(result.reference);
       clear();
-    } catch {
-      setServerError("We could not reach the kitchen. Please check your connection and retry.");
     } finally {
       setSubmitting(false);
     }
@@ -136,6 +133,33 @@ export default function CheckoutPage() {
             </Link>
             <Link href="/how-its-made" className="btn-secondary">
               See how it was made
+            </Link>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  /* ── Ordering not switched on yet ──────────────────────────────────── */
+  if (!isOrderingEnabled) {
+    return (
+      <section className="section">
+        <div className="shell max-w-2xl text-center">
+          <p className="eyebrow">Almost There</p>
+          <h1 className="mt-4 text-display">Ordering opens soon.</h1>
+          <p className="mx-auto mt-5 max-w-prose text-lede text-ink-soft">
+            The jars are made, but we have not switched on online ordering yet. Write to us and we
+            will set one aside for you — and tell you the moment the season&rsquo;s batch is ready.
+          </p>
+          <p className="note mt-7 text-[1.75rem]">
+            Some things are worth waiting for. Mangoes especially.
+          </p>
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <Link href="/contact" className="btn-primary">
+              Message us
+            </Link>
+            <Link href="/shop" className="btn-secondary">
+              Back to the jars
             </Link>
           </div>
         </div>

@@ -4,61 +4,17 @@ A premium D2C storefront for a homemade Khandeshi mango loncha brand.
 
 > **AaiChi Barni — A Taste of Khandesh. Made With a Mother's Touch.**
 
-Next.js 14 (App Router) · TypeScript · Tailwind · a JSON-file database.
+Next.js 14 (App Router) · TypeScript · Tailwind · statically exported to GitHub Pages.
 
 ```bash
 npm install
 npm run dev        # http://localhost:3000
 npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
-npm run build && npm start
+npm run build      # static export into ./out
 ```
 
-## CI/CD
-
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) has two jobs.
-
-**`verify`** — on every push and pull request to `master`: **lint → typecheck → build**, then a guard that fails if `data/db.json` ever becomes tracked or the seed picks up real orders. Node 20 with npm caching; a new push cancels the run still in flight.
-
-**`deploy`** — only on pushes to `master`, and only if `verify` passed. Builds and deploys to Vercel, then polls the deployed URL until it returns 200 so a broken deploy fails the run instead of going unnoticed.
-
-### Required repository secrets
-
-Add these under **Settings → Secrets and variables → Actions**:
-
-| Secret | Where it comes from |
-| --- | --- |
-| `VERCEL_TOKEN` | Vercel → Account Settings → Tokens |
-| `VERCEL_ORG_ID` | `.vercel/project.json` after running `vercel link` |
-| `VERCEL_PROJECT_ID` | same file |
-
-The deploy job checks all three are present and fails with a named list if any are missing, rather than letting the Vercel CLI produce an opaque auth error.
-
-## Orders in production
-
-**Vercel's filesystem is read-only outside `/tmp`, so the JSON store cannot record orders there.** The code handles this explicitly rather than pretending otherwise:
-
-- Reads work — `next.config.mjs` traces `data/**` into the serverless bundles, which Next cannot infer on its own because the paths are built with `process.cwd()`.
-- Writes are attempted, and a read-only failure is caught rather than thrown.
-- Orders are emailed to the kitchen via [`src/lib/notify.ts`](src/lib/notify.ts) (Resend REST API, no SDK dependency).
-- **If an order is neither saved nor emailed, checkout returns 503 with an honest message.** No customer is ever shown a confirmation for an order that nothing recorded.
-
-Set these environment variables in the Vercel project for email to work:
-
-| Variable | Purpose |
-| --- | --- |
-| `RESEND_API_KEY` | From resend.com |
-| `ORDER_NOTIFY_EMAIL` | Where orders land |
-| `ORDER_FROM_EMAIL` | A verified sender on your Resend domain |
-| `RESEND_API_URL` | Optional. Overrides the endpoint; used to point at a mock in tests. |
-
-With no API key set, email is skipped and the JSON store is used — which is what happens in local development.
-
-Order ids are sequential (`AB-1001`) when the store is writable. Without it the counter would restart from the empty seed and hand every order the same id, so a time-ordered id is used instead.
-
-> Long term, replace the four functions in `src/lib/db.ts` with a real database (Vercel Postgres, KV, Turso) and this whole section goes away.
-
----
+`npm run build` writes plain HTML to `out/`. There is no `npm start` — nothing needs a server.
 
 ## Pages
 
@@ -71,35 +27,50 @@ Order ids are sequential (`AB-1001`) when the store is writable. Without it the 
 | `/from-khandesh` | The region, mango season, the family table |
 | `/how-its-made` | The full seven-step journey, plus what we deliberately don't do |
 | `/contact` | Details and a validated message form |
-| `/cart`, `/checkout` | Cart page and a pay-on-delivery checkout |
+| `/cart`, `/checkout` | Cart page and checkout |
 
 Navigation is `Home · Shop · Our Story · From Khandesh · How It's Made · Contact · Cart`, with **Shop Now** as the primary button.
 
----
+## The catalogue
 
-## The database
+Products live in [`data/db.seed.json`](data/db.seed.json) and are read by [`src/lib/db.ts`](src/lib/db.ts) **at build time only** — the values are baked into the exported HTML. Edit the seed and redeploy to change copy, price, stock or ingredients; no code change needed.
 
-Deliberately simple: one JSON document read and written only through [`src/lib/db.ts`](src/lib/db.ts).
+`data/db.json` is gitignored. It was the writable store from when this ran on a server, and it may still exist locally with old orders in it. It holds real customer names, phone numbers and addresses, so it must never be committed — CI fails the build if it becomes tracked, or if the seed ever ships with a non-empty `orders` array.
 
-| File | In git? | What it is |
-| --- | --- | --- |
-| `data/db.seed.json` | yes | Products only, `orders: []`. **Edit this** to change copy, price, stock or ingredients. |
-| `data/db.json` | **no** | The live database. Created from the seed on first read, then accumulates real orders. |
+## CI/CD
 
-`data/db.json` is gitignored because it holds real customer names, phone numbers and delivery addresses. Never commit it — CI fails the build if it becomes tracked, or if the seed ever ships with a non-empty `orders` array.
+Live at **https://surekhajagtap.github.io/aaichi-barni/**
 
-- `products` — the four jars.
-- `orders` — appended when a checkout succeeds.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) has three jobs:
 
-Writes go to a temp file and are then renamed, so an interrupted write cannot corrupt the store. **Line prices are always re-read from the database** — the client payload is never trusted for pricing.
+1. **`verify`** — on every push and pull request to `master`: lint → typecheck → build, plus a guard that fails if `data/db.json` becomes tracked or the seed picks up real orders.
+2. **`build-pages`** — exports the static site with the correct base path and uploads it.
+3. **`deploy`** — publishes to GitHub Pages, then polls the live URL until it returns 200 so a broken deploy fails the run instead of going unnoticed.
 
-`POST /api/orders` validates required fields, email shape and a 6-digit PIN code, and returns field-level errors the checkout form maps back onto the inputs.
+### The approval gate
 
-To move to a real database later, replace the four exported functions in `src/lib/db.ts`. Nothing else imports the JSON.
+`deploy` targets the `github-pages` environment, which has a **required reviewer** on it. Every run stops before publishing and waits for a human to approve it in the Actions tab. Nothing reaches the live site unseen.
 
-> One dev-mode quirk: writing `data/db.json` sits inside the directory Next watches, so placing an order in `npm run dev` triggers a recompile. Production (`npm start`) is unaffected.
+Manage reviewers under **Settings → Environments → github-pages**. This needs a public repo or GitHub Pro — the free plan does not allow protection rules on private repos.
 
----
+## Orders
+
+GitHub Pages is static hosting: there is no server, so there are no API routes. Orders are posted straight from the browser to a hosted form endpoint, which emails them to the kitchen. See [`src/lib/order.ts`](src/lib/order.ts).
+
+**Until you configure an endpoint, checkout honestly says ordering is not open yet** and points people at the contact page. It does not present a form that quietly goes nowhere.
+
+To switch ordering on, add these under **Settings → Secrets and variables → Actions → Variables**:
+
+| Variable | Value |
+| --- | --- |
+| `ORDER_FORM_ENDPOINT` | e.g. `https://api.web3forms.com/submit` or your Formspree URL |
+| `ORDER_FORM_KEY` | Web3Forms access key. Leave unset for Formspree. |
+
+These are **variables, not secrets**, deliberately: they are baked into the browser bundle and are designed to be public. Do not put anything genuinely secret here.
+
+Order references are generated in the browser (`AB-` plus a time-ordered suffix) so two orders placed seconds apart cannot collide.
+
+> Whenever the brand outgrows this, replace the two functions in `src/lib/db.ts` and `src/lib/order.ts` with a real backend, and drop `output: "export"` from `next.config.mjs`.
 
 ## Replacing the illustrations with real photography
 
@@ -158,8 +129,9 @@ Bright mango and saffron appear **only as illustration fills**. Anything carryin
 
 ## What was verified
 
-- `next build` passes clean; 16 routes generated.
-- Full purchase path exercised end to end: add to cart → quantity → checkout → order `AB-1001` persisted with correct totals.
+- Static export builds clean; all 13 pages emitted, including `404.html`.
+- Served the exported site under its `/aaichi-barni/` base path: every asset — CSS, all JS chunks, all three fonts, the grain tile — returns 200, with no console errors.
+- Cart and quantity flows exercised end to end in the browser.
 - Empty-submit validation sets `aria-invalid`, announces via `role="alert"`, and moves focus to the first invalid field.
 - No horizontal scroll at 375px; body text 16px.
 - Every rendered text/background pair meets WCAG AA for its size.
@@ -171,6 +143,7 @@ Bright mango and saffron appear **only as illustration fills**. Anything carryin
 
 - **Real photography.** See above. Everything else is downstream of this.
 - **Customer stories.** [`CustomerStories.tsx`](src/components/sections/CustomerStories.tsx) ships an honest empty state on purpose — the brief says to use real reviews once available and not to invent testimonials. Fill the `REVIEWS` array when genuine ones exist and the grid renders automatically.
+- **Ordering is off** until `ORDER_FORM_ENDPOINT` is set — see the Orders section above.
 - **Payments.** Checkout is pay-on-delivery; no card details are collected anywhere on the site.
-- **Contact form** validates and confirms client-side but does not yet send mail.
+- **Contact form** validates and confirms client-side but does not yet send mail. Point it at the same form endpoint as checkout to fix that.
 - Placeholder contact details in `src/app/contact/page.tsx` need the real email and phone number.
