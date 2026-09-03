@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-ivory-50 text-ink font-sans antialiased;
+    font-size: 1rem;
+    line-height: 1.65;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-serif text-ink;
+    text-wrap: balance;
+  }
+
+  /* Focus is never removed — only restyled to match the warm palette. */
+  :focus-visible {
+    outline: 3px solid theme("colors.terracotta.DEFAULT");
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: theme("colors.mango.DEFAULT");
+    color: theme("colors.ink.DEFAULT");
+  }
+
+  /* Prices and weights use tabular figures so rows never jitter. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .shell {
+    @apply mx-auto w-full max-w-shell px-5 sm:px-8 lg:px-12;
+  }
+
+  .section {
+    @apply py-18 sm:py-22 lg:py-30;
+  }
+
+  /* Small uppercase eyebrow above section headings */
+  .eyebrow {
+    @apply text-label font-medium uppercase tracking-[0.14em] text-saffron;
+  }
+
+  .btn {
+    @apply inline-flex min-h-[44px] cursor-pointer items-center justify-center gap-2 rounded-pill px-6 text-[0.9375rem] font-medium
+           transition-[background-color,color,border-color,box-shadow,transform] duration-enter ease-out
+           active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-terracotta text-white shadow-e2 hover:bg-terracotta-dark hover:shadow-e3;
+  }
+
+  .btn-secondary {
+    @apply btn border border-sand bg-card text-ink hover:border-terracotta hover:text-terracotta;
+  }
+
+  .btn-ghost {
+    @apply btn text-ink-soft hover:bg-ivory-100 hover:text-ink;
+  }
+
+  .card {
+    @apply rounded-card border border-sand/70 bg-card shadow-e1;
+  }
+
+  /* A mother's note — handwritten, used sparingly */
+  .note {
+    @apply font-hand text-[1.375rem] leading-snug text-saffron;
+  }
+
+  .field {
+    @apply min-h-[48px] w-full rounded-lg border border-sand bg-card px-4 text-base text-ink
+           placeholder:text-ink-faint focus:border-terracotta focus:outline-none focus-visible:outline-none
+           focus:ring-2 focus:ring-terracotta/30;
+  }
+
+  /* Subtle woven texture used behind hero + closing CTA. Pure CSS, no image weight. */
+  .weave {
+    background-image: radial-gradient(circle at 1px 1px, rgba(168, 64, 28, 0.09) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+}
+
+/* Scroll-reveal: elements start hidden, IntersectionObserver adds .is-in */
+@layer utilities {
+  .reveal {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity 620ms cubic-bezier(0.16, 1, 0.3, 1), transform 620ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .reveal.is-in {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Motion is meaningful, but always optional. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
