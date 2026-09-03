@@ -14,9 +14,49 @@ npm run typecheck  # tsc --noEmit
 npm run build && npm start
 ```
 
-## CI
+## CI/CD
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to `master`: **lint → typecheck → build**, then a guard that fails if `data/db.json` ever becomes tracked or the seed picks up real orders. Runs on Node 20 with npm caching; a new push cancels the run still in flight.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) has two jobs.
+
+**`verify`** — on every push and pull request to `master`: **lint → typecheck → build**, then a guard that fails if `data/db.json` ever becomes tracked or the seed picks up real orders. Node 20 with npm caching; a new push cancels the run still in flight.
+
+**`deploy`** — only on pushes to `master`, and only if `verify` passed. Builds and deploys to Vercel, then polls the deployed URL until it returns 200 so a broken deploy fails the run instead of going unnoticed.
+
+### Required repository secrets
+
+Add these under **Settings → Secrets and variables → Actions**:
+
+| Secret | Where it comes from |
+| --- | --- |
+| `VERCEL_TOKEN` | Vercel → Account Settings → Tokens |
+| `VERCEL_ORG_ID` | `.vercel/project.json` after running `vercel link` |
+| `VERCEL_PROJECT_ID` | same file |
+
+The deploy job checks all three are present and fails with a named list if any are missing, rather than letting the Vercel CLI produce an opaque auth error.
+
+## Orders in production
+
+**Vercel's filesystem is read-only outside `/tmp`, so the JSON store cannot record orders there.** The code handles this explicitly rather than pretending otherwise:
+
+- Reads work — `next.config.mjs` traces `data/**` into the serverless bundles, which Next cannot infer on its own because the paths are built with `process.cwd()`.
+- Writes are attempted, and a read-only failure is caught rather than thrown.
+- Orders are emailed to the kitchen via [`src/lib/notify.ts`](src/lib/notify.ts) (Resend REST API, no SDK dependency).
+- **If an order is neither saved nor emailed, checkout returns 503 with an honest message.** No customer is ever shown a confirmation for an order that nothing recorded.
+
+Set these environment variables in the Vercel project for email to work:
+
+| Variable | Purpose |
+| --- | --- |
+| `RESEND_API_KEY` | From resend.com |
+| `ORDER_NOTIFY_EMAIL` | Where orders land |
+| `ORDER_FROM_EMAIL` | A verified sender on your Resend domain |
+| `RESEND_API_URL` | Optional. Overrides the endpoint; used to point at a mock in tests. |
+
+With no API key set, email is skipped and the JSON store is used — which is what happens in local development.
+
+Order ids are sequential (`AB-1001`) when the store is writable. Without it the counter would restart from the empty seed and hand every order the same id, so a time-ordered id is used instead.
+
+> Long term, replace the four functions in `src/lib/db.ts` with a real database (Vercel Postgres, KV, Turso) and this whole section goes away.
 
 ---
 

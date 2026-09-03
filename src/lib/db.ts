@@ -66,18 +66,33 @@ type Database = {
 const DB_PATH = path.join(process.cwd(), "data", "db.json");
 const SEED_PATH = path.join(process.cwd(), "data", "db.seed.json");
 
+/** A serverless host gives us a read-only filesystem outside /tmp. */
+function isReadOnly(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return code === "EROFS" || code === "EACCES" || code === "EPERM";
+}
+
 /**
  * db.json holds real customer orders, so it is gitignored and does not exist on
- * a fresh clone or a clean CI checkout. The seed — products only, no orders — is
- * what lives in version control, and the live file is created from it on first read.
+ * a fresh clone, a clean CI checkout, or a serverless deployment. The seed —
+ * products only, no orders — is what lives in version control.
+ *
+ * Locally the seed is copied to db.json on first read so orders can accumulate.
+ * On a read-only host that copy is skipped and the seed is served directly:
+ * products still render, and persistence is handled by createOrder's caller.
  */
 async function read(): Promise<Database> {
   try {
     return JSON.parse(await fs.readFile(DB_PATH, "utf8")) as Database;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+
     const seed = await fs.readFile(SEED_PATH, "utf8");
-    await fs.writeFile(DB_PATH, seed, "utf8");
+    try {
+      await fs.writeFile(DB_PATH, seed, "utf8");
+    } catch (writeError) {
+      if (!isReadOnly(writeError)) throw writeError;
+    }
     return JSON.parse(seed) as Database;
   }
 }
@@ -99,10 +114,17 @@ export async function getProduct(slug: string): Promise<Product | undefined> {
   return db.products.find((p) => p.slug === slug);
 }
 
+/**
+ * `persisted` is false when the host filesystem is read-only, which is the norm
+ * on serverless. The order is still fully built and priced; recording it becomes
+ * the caller's responsibility (see the email delivery in the orders route).
+ */
+export type CreatedOrder = { order: Order; persisted: boolean };
+
 export async function createOrder(input: {
   items: OrderItem[];
   customer: Order["customer"];
-}): Promise<Order> {
+}): Promise<CreatedOrder> {
   const db = await read();
 
   // Price from the database, never from the client payload.
@@ -128,8 +150,23 @@ export async function createOrder(input: {
   };
 
   db.orders.push(order);
-  await write(db);
-  return order;
+
+  try {
+    await write(db);
+    return { order, persisted: true };
+  } catch (error) {
+    if (!isReadOnly(error)) throw error;
+
+    // Without a writable store the sequential counter always restarts from the
+    // empty seed, so every order would be handed the same id. Fall back to a
+    // time-ordered one that stays unique across invocations.
+    const stamp = Date.now().toString(36).toUpperCase();
+    const salt = Math.floor(Math.random() * 1296)
+      .toString(36)
+      .toUpperCase()
+      .padStart(2, "0");
+    return { order: { ...order, id: `AB-${stamp}${salt}` }, persisted: false };
+  }
 }
 
 export async function getOrder(id: string): Promise<Order | undefined> {

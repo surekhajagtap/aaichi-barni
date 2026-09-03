@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createOrder, type Order, type OrderItem } from "@/lib/db";
+import { notifyOrder } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,37 @@ export async function POST(request: Request) {
   try {
     // Every required field was checked above, so the shape is known good here.
     // createOrder re-reads name and price from the database regardless.
-    const order = await createOrder({
+    const { order, persisted } = await createOrder({
       items: body.items as OrderItem[],
       customer: customer as unknown as Order["customer"],
     });
+
+    const notified = await notifyOrder(order);
+
+    // An order has to land somewhere. If the filesystem was read-only *and* the
+    // email did not go out, nothing recorded it — so say so rather than showing
+    // a confirmation for an order nobody will ever cook.
+    if (!persisted && !notified.sent) {
+      console.error("Order could not be recorded", {
+        id: order.id,
+        persisted,
+        emailSkipped: notified.skipped,
+        emailError: notified.error,
+      });
+      return NextResponse.json(
+        {
+          error:
+            "We could not record your order just now. Nothing has been charged — please try again in a moment, or message us and we will take it down by hand.",
+        },
+        { status: 503 },
+      );
+    }
+
+    if (notified.error) {
+      // Persisted, so the order is safe; the email is a courtesy that failed.
+      console.error("Order saved but notification failed", notified.error);
+    }
+
     return NextResponse.json({ order }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Something went wrong.";
